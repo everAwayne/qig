@@ -3,3 +3,9 @@ class IGError(Exception):
 
 class LoginRetryError(IGError):
     pass
+
+class APITimeoutError(IGError):
+    pass
+
+class UnkownAPIError(IGError):
+    pass
