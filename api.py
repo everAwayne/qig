@@ -69,7 +69,7 @@ class IGSessionBase:
             raise LoginRetryError()
 
     async def api(self, api_name, *args, **kwargs):
-        func_name = api_name.replace('/', '_')
+        func_name = '_' + api_name
         try:
             func = getattr(self, func_name)
         except AttributeError:
@@ -90,6 +90,22 @@ class IGSessionBase:
             else:
                 return result
 
+    async def _session_detail(self):
+        api = "/session"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _log_out(self):
+        api = "/session"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.delete(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
     async def _accounts(self):
         api = "/accounts"
         headers = self._headers.copy()
@@ -98,7 +114,7 @@ class IGSessionBase:
             info = await resp.json()
             return info
 
-    async def _marketnavigation(self, node_id=''):
+    async def _market_navigation(self, node_id=''):
         api = "/marketnavigation"
         headers = self._headers.copy()
         if node_id:
@@ -108,23 +124,32 @@ class IGSessionBase:
             info = await resp.json()
             return info
 
-    async def _markets(self, epics, filter='ALL', searchTerm=''):
+    async def _market_detail(self, epic):
+        api = "/markets"
+        headers = self._headers.copy()
+        api += '/' + epic
+        headers["Version"] = "3"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _market_detail_mul(self, epics, filter='ALL'):
         api = "/markets"
         headers = self._headers.copy()
         params = {}
-        if searchTerm:
-            headers["Version"] = "1"
-            params['searchTerm'] = searchTerm
-        else:
-            assert epics, "epics can't be empty"
-            if len(epics)==1:
-                api += '/' + epics[0]
-                headers["Version"] = "3"
-            else:
-                headers["Version"] = "2"
-                params['epics'] = ','.join(epics[:50])
-                assert filter in ['ALL', 'SNAPSHOT_ONLY'], 'filter is illegal'
-                params['filter'] = filter
+        headers["Version"] = "2"
+        params['epics'] = ','.join(epics[:50])
+        params['filter'] = filter
+        async with self._session.get(self._api_prefix+api, headers=headers, params=params) as resp:
+            info = await resp.json()
+            return info
+
+    async def _market_search(self, searchTerm=''):
+        api = "/markets"
+        headers = self._headers.copy()
+        params = {}
+        headers["Version"] = "1"
+        params['searchTerm'] = searchTerm
         async with self._session.get(self._api_prefix+api, headers=headers, params=params) as resp:
             info = await resp.json()
             return info
@@ -150,6 +175,64 @@ class IGSessionBase:
             info = await resp.json()
             return info
 
+    async def _all_watchlist(self):
+        api = "/watchlists"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _create_watchlist(self, name, epics):
+        api = "/watchlists"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        data = {
+            "name": name,
+            "epics": epics,
+        }
+        async with self._session.post(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
+
+    async def _delete_watchlist(self, watchlist_id):
+        api = "/watchlists"
+        api += '/' + watchlist_id
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.delete(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _watchlist_detail(self, watchlist_id):
+        api = "/watchlists"
+        api += '/' + watchlist_id
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _add_market_to_watchlist(self, watchlist_id, epic):
+        api = "/watchlists"
+        api += '/' + watchlist_id
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        data = {
+            "epic": epic
+        }
+        async with self._session.put(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
+
+    async def _remove_market_from_watchlist(self, watchlist_id, epic):
+        api = "/watchlists"
+        api += '/' + watchlist_id + '/' + epic
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.delete(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
 
 
 class IGSessionDemo(IGSessionBase):
