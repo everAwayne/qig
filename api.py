@@ -1,66 +1,45 @@
 import json
 import aiohttp
 import asyncio
-from log import logger
-from error import *
+from .log import logger
+from .error import *
 
 
-PROD_API_PREFIX = "https://api.ig.com/gateway/deal"
-DEMO_API_PREFIX = "https://demo-api.ig.com/gateway/deal"
+__all__ = ['IGWebAPI']
 
 
-CST = "b4a2f7229f39cb214c40e46c1e0f98331dbf4f1db4eda5e1e47aabc6d53b532001113"
-X_SECURITY_TOKEN = "a353a62bdd1def5ff54abe34950ee8edcb9be9dd812deec81a5e9eb25720fd4601113"
+class IGWebAPI:
+    """Implement web API of IG.
 
-
-class IGSessionBase:
-    """Session that maintain the communication with IG.
-
-    Offer all available api
+    - Auto re-login
     """
-    _api_prefix = None
-    _api_map = {
-        '/session'
-    }
 
-    def __init__(self, app_key, account, password, **kwargs):
-        self.app_key = app_key
-        self.account = account
-        self.password = password
-        self.client_id = None
-        self.account_id = None
+    def __init__(self, api_prefix, app_key, account, password, **kwargs):
+        self._api_prefix = api_prefix
+        self._app_key = app_key
+        self._account = account
+        self._password = password
         self._headers = {
             "Content-Type": "application/json; charset=UTF-8",
             "Accept": "application/json; charset=UTF-8",
-            "X-IG-API-KEY": self.app_key,
+            "X-IG-API-KEY": self._app_key,
         }
         self._session = aiohttp.ClientSession(headers=self._headers, raise_for_status=True, **kwargs)
 
-    async def _log_in_2(self):
-        api = "/session"
-        headers = self._headers.copy()
-        headers["Version"] = "2"
-        headers["CST"] = ""
-        headers["X-SECURITY-TOKEN"] = ""
-        data = {
-            "encryptedPassword": False,
-            "identifier": self.account,
-            "password": self.password,
-        }
-        async with self._session.post(self._api_prefix+api, headers=headers, json=data) as resp:
-            info = await resp.json()
-            self.client_id = info.get('clientId')
-            self.account_id = info.get('currentAccountId')
-            self._headers['CST'] = resp.headers.get('CST')
-            self._headers['X-SECURITY-TOKEN'] = resp.headers.get('X-SECURITY-TOKEN')
+    def set_headers(self, headers):
+        self._headers.update(headers)
+
+    @property
+    def headers(self):
+        return self._headers
 
     async def log_in(self):
         t = 3
         while t>0:
             try:
-                await self._log_in_2()
+                await self._log_in()
             except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as exc:
-                logger.error("Retry to login")
+                logger.info("Retry to login")
                 t -= 1
                 continue
             else:
@@ -90,6 +69,25 @@ class IGSessionBase:
             else:
                 return result
 
+    def __del__(self):
+        self._session.close()
+
+    async def _log_in(self):
+        api = "/session"
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        headers["CST"] = ""
+        headers['X-SECURITY-TOKEN'] = ""
+        data = {
+            "encryptedPassword": False,
+            "identifier": self._account,
+            "password": self._password,
+        }
+        async with self._session.post(self._api_prefix+api, headers=headers, json=data) as resp:
+            await resp.json()
+            self._headers['CST'] = resp.headers.get('CST')
+            self._headers['X-SECURITY-TOKEN'] = resp.headers.get('X-SECURITY-TOKEN')
+
     async def _session_detail(self):
         api = "/session"
         headers = self._headers.copy()
@@ -103,6 +101,25 @@ class IGSessionBase:
         headers = self._headers.copy()
         headers["Version"] = "1"
         async with self._session.delete(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _get_encryption_key(self):
+        api = "/session/encryptionKey"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _refresh_token(self, refresh_token):
+        api = "/session/refresh-token"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        data = {
+            "refresh_token": name
+        }
+        async with self._session.post(self._api_prefix+api, json=data) as resp:
             info = await resp.json()
             return info
 
@@ -234,19 +251,215 @@ class IGSessionBase:
             info = await resp.json()
             return info
 
+    async def _client_sentiment_mul(self, marketids):
+        api = "/clientsentiment"
+        headers = self._headers.copy()
+        params = {}
+        headers["Version"] = "1"
+        params['marketIds'] = ','.join(marketids)
+        async with self._session.get(self._api_prefix+api, headers=headers, params=params) as resp:
+            info = await resp.json()
+            return info
 
-class IGSessionDemo(IGSessionBase):
-    """IGSession for demo environment
-    """
-    _api_prefix = DEMO_API_PREFIX
+    async def _client_sentiment(self, marketid):
+        api = "/clientsentiment"
+        api += '/' + marketid
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
 
-    def __init__(self, app_key, account, password, read_timeout=10, conn_timeout=5, **kwargs):
-        super(IGSessionDemo, self).__init__(app_key, account, password, read_timeout=read_timeout,
-                                            conn_timeout=conn_timeout, **kwargs)
-        pass
+    async def _related_client_sentiment(self, marketid):
+        api = "/clientsentiment/related"
+        api += '/' + marketid
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
 
+    async def _history_activity(self, start_date='', end_date='', detailed=False, dealid='', page_size=50, filter=''):
+        api = "/history/activity"
+        headers = self._headers.copy()
+        headers["Version"] = "3"
+        params = {}
+        params['from'] = start_date
+        params['to'] = end_date
+        params['detailed'] = detailed
+        params['dealId'] = dealid
+        params['filter'] = filter
+        params['pageSize'] = page_size
+        async with self._session.get(self._api_prefix+api, headers=headers, params=params) as resp:
+            info = await resp.json()
+            return info
 
-class IGSessionProd(IGSessionBase):
-    """IGSession for prod environment
-    """
-    _api_prefix = PROD_API_PREFIX
+    async def _confirm_deal(self, deal_reference):
+        api = "/confirms"
+        api += '/' + deal_reference
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _get_positions(self, dealid):
+        api = "/positions"
+        api += '/' + dealid
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _get_all_positions(self):
+        api = "/positions"
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _open_positions(self, deal_reference, currency, direction, epic, expiry,
+                              force_open, guaranteed_stop, level, size, order_type,
+                              limit_distance, limit_level, stop_distance, stop_level,
+                              time_in_force, trailing_stop, trailing_stop_increment):
+        api = "/positions/otc"
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        assert direction in ["BUY", "SELL"], "direction error @open_positions"
+        assert order_type in ["LIMIT", "MARKET"], "order_type error @open_positions"
+        assert time_in_force in ["EXECUTE_AND_ELIMINATE", "FILL_OR_KILL"], "time_in_force error @open_positions"
+        data = {
+            'currencyCode': currency,
+            'dealReference': deal_reference,
+            'direction': direction,
+            'epic': epic,
+            'expiry': expiry,
+            'forceOpen': force_open,
+            'guaranteedStop': guaranteed_stop,
+            'level': level,
+            'size': size,
+            'orderType': order_type,
+            'limitDistance': limit_distance,
+            'limitLevel': limit_level,
+            'stopDistance': stop_distance,
+            'stopLevel': stop_level,
+            'timeInForce': time_in_force,
+            'trailingStop': trailing_stop,
+            'trailingStopIncrement': trailing_stop_increment,
+        }
+        async with self._session.post(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
+
+    async def _close_positions(self, dealid, direction, epic, expiry, level, size,
+                               order_type, time_in_force):
+        api = "/positions/otc"
+        headers = self._headers.copy()
+        headers["Version"] = "1"
+        assert direction in ["BUY", "SELL"], "direction error @open_position"
+        assert order_type in ["LIMIT", "MARKET"], "order_type error @open_position"
+        assert time_in_force in ["EXECUTE_AND_ELIMINATE", "FILL_OR_KILL"], "time_in_force error @open_position"
+        data = {
+            'dealId': dealid,
+            'direction': direction,
+            'epic': epic,
+            'expiry': expiry,
+            'level': level,
+            'size': size,
+            'orderType': order_type,
+            'timeInForce': time_in_force
+        }
+        async with self._session.delete(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
+
+    async def _update_positions(self, dealid, limit_level, stop_level, trailing_stop,
+                                trailing_stop_distance, trailing_stop_increment):
+        api = "/positions/otc"
+        api += '/' + dealid
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        data = {
+            'limitLevel': limit_level,
+            'stopLevel': stop_level,
+            'trailingStop': trailing_stop,
+            'trailingStopDistance': trailing_stop_distance,
+            'trailingStopIncrement': trailing_stop_increment,
+        }
+        async with self._session.put(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
+
+    async def _get_all_workingorders(self):
+        api = "/workingorders"
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        async with self._session.get(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _create_workingorders(self, deal_reference, currency, direction, epic, expiry,
+                                   force_open, guaranteed_stop, level, size, order_type,
+                                   limit_distance, limit_level, stop_distance, stop_level,
+                                   time_in_force, good_till_date):
+        api = "/workingorders/otc"
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        assert direction in ["BUY", "SELL"], "direction error @create_workingorders"
+        assert order_type in ["LIMIT", "STOP"], "order_type error @create_workingorders"
+        assert time_in_force in ["GOOD_TILL_CANCELLED", "GOOD_TILL_DATE"], "time_in_force error @create_workingorders"
+        data = {
+            'currencyCode': currency,
+            'dealReference': deal_reference,
+            'direction': direction,
+            'epic': epic,
+            'expiry': expiry,
+            'forceOpen': force_open,
+            'guaranteedStop': guaranteed_stop,
+            'level': level,
+            'size': size,
+            'type': order_type,
+            'limitDistance': limit_distance,
+            'limitLevel': limit_level,
+            'stopDistance': stop_distance,
+            'stopLevel': stop_level,
+            'timeInForce': time_in_force,
+            'goodTillDate': good_till_date,
+        }
+        async with self._session.post(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
+
+    async def _delete_workingorders(self, dealid):
+        api = "/workingorders/otc"
+        api += '/' + dealid
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        async with self._session.delete(self._api_prefix+api, headers=headers) as resp:
+            info = await resp.json()
+            return info
+
+    async def _update_workingorders(self, dealid, level, order_type, limit_distance,
+                                    limit_level, stop_distance, stop_level, time_in_force,
+                                    good_till_date):
+        api = "/workingorders/otc"
+        api += '/' + dealid
+        headers = self._headers.copy()
+        headers["Version"] = "2"
+        assert order_type in ["LIMIT", "STOP"], "order_type error @update_workingorders"
+        assert time_in_force in ["GOOD_TILL_CANCELLED", "GOOD_TILL_DATE"], "time_in_force error @update_workingorders"
+        data = {
+            'level': level,
+            'type': order_type,
+            'limitDistance': limit_distance,
+            'limitLevel': limit_level,
+            'stopDistance': stop_distance,
+            'stopLevel': stop_level,
+            'timeInForce': time_in_force,
+            'goodTillDate': good_till_date,
+        }
+        async with self._session.put(self._api_prefix+api, headers=headers, json=data) as resp:
+            info = await resp.json()
+            return info
