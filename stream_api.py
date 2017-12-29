@@ -26,7 +26,8 @@ class IGStreamAPI:
     """
 
     def __init__(self, api_prefix, app_key, account, password, adapter_set, loop=None, **kwargs):
-        if loop is None:
+        self._loop = loop
+        if self._loop is None:
             self._loop = asyncio.get_event_loop()
         self._api_prefix = api_prefix
         self._app_key = app_key
@@ -38,7 +39,7 @@ class IGStreamAPI:
         self._CST = None
         self._XST = None
         self.web_api = IGWebAPI(api_prefix, app_key, account, password, read_timeout=10, conn_timeout=5)
-        self._session = aiohttp.ClientSession(conn_timeout=10)
+        self._session = aiohttp.ClientSession(read_timeout=0, conn_timeout=10)
         self._stream = None
         self._meta_data = {}
         self._control_endpoint = None
@@ -171,7 +172,7 @@ class IGStreamAPI:
     def _reset_context(self):
         self._session.close()
         self._stream = None
-        self._session = aiohttp.ClientSession(conn_timeout=10)
+        self._session = aiohttp.ClientSession(read_timeout=0, conn_timeout=10)
         for sub_id in self._subscribe_map:
             self._subscribe_map[sub_id]['items'] = {}
         self._meta_data = {}
@@ -207,7 +208,7 @@ class IGStreamAPI:
         return item_info
 
     def add_listener(self, handler):
-        self._handler = handler
+        self._handler = asyncio.coroutines.coroutine(handler)
 
     def subscribe(self, conf):
         sub_id = len(self._subscribe_map)+1
@@ -255,11 +256,11 @@ class IGStreamAPI:
                     pass
                 else:
                     info = self._data_parse(line)
-                    self._handler(info)
+                    await self._handler(info)
 
             if rebind:
                 self._stream = None
-                ret = self._rebind()
+                ret = await self._rebind()
                 if not ret:
                     reconnect = True
             if reconnect:
